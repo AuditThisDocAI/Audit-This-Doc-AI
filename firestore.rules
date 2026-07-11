@@ -26,7 +26,7 @@ service cloud.firestore {
         && data.email is string 
         && data.email.size() <= 256
         && data.paymentTier is string
-        && data.paymentTier in ['free', 'unlimited', 'bundle', 'payg'];
+        && data.paymentTier in ['free', 'starter', 'professional', 'business', 'enterprise', 'growth', 'pro', 'unlimited', 'bundle', 'payg'];
     }
 
     // Invoice document schema validator

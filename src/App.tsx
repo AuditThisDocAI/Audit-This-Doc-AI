@@ -97,6 +97,7 @@ import {
   CustomField,
   UserAccount,
   ExpenseRecord,
+  TaxReturnRecord,
   WorkJob,
   WorkTask,
   ClientCallLog,
@@ -722,6 +723,15 @@ export default function App() {
   );
   const [history, setHistory] = useState<SavedHistory[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
+  const [taxReturns, setTaxReturns] = useState<TaxReturnRecord[]>(() => {
+    const saved = localStorage.getItem("gmi_tax_returns");
+    if (saved) return JSON.parse(saved);
+    return [];
+  });
+  
+  useEffect(() => {
+    localStorage.setItem("gmi_tax_returns", JSON.stringify(taxReturns));
+  }, [taxReturns]);
 
   // Tax Audit Date Range
   const [taxAuditStartDate, setTaxAuditStartDate] = useState<string>("");
@@ -1352,7 +1362,7 @@ export default function App() {
     } catch {}
   }, [dashboardConfig]);
   const [bookkeepingSubtab, setBookkeepingSubtab] = useState<
-    "dashboard" | "analytics" | "exchange_rates"
+    "dashboard" | "analytics" | "exchange_rates" | "tax_returns"
   >("dashboard");
   const [editorTab, setEditorTab] = useState<
     "basic" | "parties" | "items" | "footer" | "recurring"
@@ -1389,9 +1399,9 @@ export default function App() {
   const handleTabChange = (tab: any) => {
     const plan = userProfile?.paymentTier || "free";
     const hasPro =
-      plan === "professional" ||
-      plan === "business" ||
-      plan === "enterprise" ||
+      ["growth", "pro", "professional", "business", "enterprise", "unlimited", "starter"].includes(plan) ||
+      userProfile?.email?.toLowerCase().trim() === "brigittalombard09@gmail.com" ||
+      userProfile?.email?.toLowerCase().trim() === "info@seolab.co.za" ||
       userProfile?.trialActive;
 
     const restrictedTabs: Record<string, string> = {
@@ -1694,7 +1704,23 @@ export default function App() {
   };
 
   // User Authentication, Billing and Payment States
-  const [userProfile, setUserProfile] = useState<UserAccount | null>(null);
+  const [rawUserProfile, setRawUserProfile] = useState<UserAccount | null>(null);
+  
+  const userProfile = React.useMemo(() => {
+    if (!rawUserProfile) return null;
+    const e = rawUserProfile.email?.toLowerCase().trim();
+    if (e === "brigittalombard09@gmail.com" || e === "info@seolab.co.za") {
+      return {
+        ...rawUserProfile,
+        paymentTier: "unlimited",
+        invoiceCredits: 999999,
+        aiCreditsRemaining: 999999
+      };
+    }
+    return rawUserProfile;
+  }, [rawUserProfile]);
+
+  const setUserProfile = setRawUserProfile;
 
   // Active triggered popup reminder state
   const [triggeredReminderPopup, setTriggeredReminderPopup] = useState<{
@@ -1732,8 +1758,11 @@ export default function App() {
       try {
         const res = await fetch("/api/stripe/payment-links");
         if (res.ok) {
-          const data = await res.json();
-          setRecentPaymentLinks(data.links || []);
+          const contentType = res.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            const data = await res.json();
+            setRecentPaymentLinks(data.links || []);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch payment links:", err);
@@ -2256,9 +2285,12 @@ export default function App() {
     try {
       const res = await fetch("/api/recurring");
       if (res.ok) {
-        const data = await res.json();
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
         setRecurringSchedules(data);
-        localStorage.setItem("gmi_fallback_recurring", JSON.stringify(data));
+          localStorage.setItem("gmi_fallback_recurring", JSON.stringify(data));
+        }
       } else {
         const fallback = localStorage.getItem("gmi_fallback_recurring");
         if (fallback) {
@@ -2801,7 +2833,7 @@ export default function App() {
     }
     if (
       userProfile &&
-      (userProfile.email.toLowerCase() === "brigittalombard09@gmail.com" ||
+      ((userProfile.email?.toLowerCase().trim() === "brigittalombard09@gmail.com") ||
         false)
     ) {
       return true;
@@ -3275,6 +3307,28 @@ export default function App() {
                   "📡 Restored real Firebase session profile:",
                   firebaseUser.email,
                 );
+              } else {
+                const isSpecial =
+                  firebaseUser.email?.toLowerCase().trim() === "info@seolab.co.za" ||
+                  firebaseUser.email?.toLowerCase().trim() === "brigittalombard09@gmail.com";
+                
+                const newProfile: UserAccount = {
+                  uid: firebaseUser.uid,
+                  email: firebaseUser.email || "guest@smartinvoice.com",
+                  paymentTier: isSpecial ? "enterprise" : "free",
+                  invoiceCredits: isSpecial ? 999999 : 3,
+                  amountPaid: 0,
+                  invoicesCount: 0,
+                  createdAt: new Date().toISOString(),
+                };
+                
+                try {
+                  await setDoc(userRef, newProfile);
+                } catch (e) {
+                  console.warn("Could not lazily create missing user profile doc.", e);
+                }
+                
+                setUserProfile(newProfile);
               }
             } catch (err: any) {
               if (isRealFirebase && err && err.name === "FirebaseError") {
@@ -3313,7 +3367,8 @@ export default function App() {
           // IMPORTANT BYPASS: Allow special admin emails to retain simulated access if Firebase Auth fails or is disconnected
           const storedSimEmail = localStorage.getItem("gmi_current_sim_email");
           const isSpecialUser =
-            storedSimEmail === "brigittalombard09@gmail.com" || false;
+            storedSimEmail === "brigittalombard09@gmail.com" || 
+            storedSimEmail === "info@seolab.co.za" || false;
 
           if (isSpecialUser && storedSimEmail) {
             try {
@@ -5264,7 +5319,7 @@ export default function App() {
         "professional",
         "business",
         "enterprise",
-      ].includes(userProfile.paymentTier || "");
+      ].includes(userProfile.paymentTier || "") || userProfile.email?.toLowerCase().trim() === "brigittalombard09@gmail.com" || userProfile.email?.toLowerCase().trim() === "info@seolab.co.za";
       if (!isUnlimitedPlan && userProfile.invoiceCredits <= 0) {
         if (userProfile.paymentTier === "payg") {
           handleShowAlert(
@@ -6581,7 +6636,7 @@ export default function App() {
                       <p className="text-[10.5px] font-black text-zinc-800 leading-none truncate max-w-[130px]">
                         {userProfile.email}
                       </p>
-                      {userProfile.email.toLowerCase() ===
+                      {userProfile.email?.toLowerCase().trim() ===
                         "brigittalombard09@gmail.com" && (
                         <span className="text-[7px] bg-red-50 text-red-650 font-extrabold px-1 py-0.5 rounded leading-none border border-red-150 font-mono tracking-wider">
                           ADMIN
@@ -6774,7 +6829,7 @@ export default function App() {
                   </div>
                 )}
               {userProfile &&
-                userProfile.email.toLowerCase() ===
+                userProfile.email?.toLowerCase().trim() ===
                   "brigittalombard09@gmail.com" && (
                   <button
                     onClick={() => setActiveTab("admin")}
@@ -8064,9 +8119,9 @@ export default function App() {
                 (() => {
                   const isPremiumTier =
                     userProfile &&
-                    ["growth", "pro", "business", "unlimited"].includes(
+                    (["growth", "pro", "business", "unlimited"].includes(
                       userProfile.paymentTier || "",
-                    );
+                    ) || userProfile.email?.toLowerCase().trim() === "brigittalombard09@gmail.com" || userProfile.email?.toLowerCase().trim() === "info@seolab.co.za");
 
                   if (!isPremiumTier) {
                     return (
@@ -8266,9 +8321,9 @@ export default function App() {
                 (() => {
                   const isPremiumTier =
                     userProfile &&
-                    ["growth", "pro", "business", "unlimited"].includes(
+                    (["growth", "pro", "business", "unlimited"].includes(
                       userProfile.paymentTier || "",
-                    );
+                    ) || userProfile.email?.toLowerCase().trim() === "brigittalombard09@gmail.com" || userProfile.email?.toLowerCase().trim() === "info@seolab.co.za");
 
                   if (!isPremiumTier) {
                     return (
@@ -8862,6 +8917,12 @@ export default function App() {
                           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-sm ${bookkeepingSubtab === "exchange_rates" ? "bg-white text-zinc-900 border border-zinc-200" : "bg-transparent text-zinc-500 hover:text-zinc-800"}`}
                         >
                           Exchange Rate Audit
+                        </button>
+                        <button
+                          onClick={() => setBookkeepingSubtab("tax_returns")}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-sm ${bookkeepingSubtab === "tax_returns" ? "bg-white text-zinc-900 border border-zinc-200" : "bg-transparent text-zinc-500 hover:text-zinc-800"}`}
+                        >
+                          Tax Returns
                         </button>
                       </div>
 
@@ -10557,6 +10618,112 @@ export default function App() {
                   );
                 })()}
 
+              
+                      {bookkeepingSubtab === "tax_returns" && (
+                        <div className="space-y-6 animate-fadeIn">
+                          <div className="flex justify-between items-end">
+                            <div>
+                              <h3 className="text-lg font-bold text-zinc-900">Tax Return Log</h3>
+                              <p className="text-xs text-zinc-500">Record and track your historical tax returns.</p>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const year = prompt("Enter Tax Year (e.g., " + new Date().getFullYear() + "):", new Date().getFullYear().toString());
+                                if (!year) return;
+                                const categoryRaw = prompt("Enter Category (Personal, Business, Capital Gains):", "Personal");
+                                if (!categoryRaw) return;
+                                const category = categoryRaw.trim();
+                                const income = prompt("Enter Total Income ($):", "0");
+                                if (!income) return;
+                                const tax = prompt("Enter Total Tax Paid/Owed ($):", "0");
+                                if (!tax) return;
+                                const statusRaw = prompt("Enter Status (pending, filed, accepted, rejected):", "filed");
+                                const status = ["pending", "filed", "accepted", "rejected"].includes(statusRaw?.toLowerCase() || "") ? statusRaw?.toLowerCase() : "filed";
+                                
+                                setTaxReturns(prev => [...prev, {
+                                  id: "tr_" + Date.now(),
+                                  year: parseInt(year),
+                                  dateFiled: new Date().toISOString().split('T')[0],
+                                  status: status as any,
+                                  category: category,
+                                  totalIncome: parseFloat(income),
+                                  totalTax: parseFloat(tax),
+                                  notes: ""
+                                }]);
+                                handleShowAlert("✅ Tax return logged successfully.");
+                              }}
+                              className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm hover:bg-indigo-700 transition-colors"
+                            >
+                              + Log Return
+                            </button>
+                          </div>
+                          
+                          {taxReturns.length === 0 ? (
+                            <div className="w-full flex flex-col items-center justify-center text-zinc-400 bg-zinc-50/50 rounded-2xl border border-zinc-100 border-dashed p-8">
+                              <FileText className="w-8 h-8 mb-3 text-zinc-300" />
+                              <span className="text-sm font-bold block mb-1 text-zinc-500">
+                                No Tax Returns Logged
+                              </span>
+                              <span className="text-xs max-w-xs text-center">
+                                Log your filed tax returns here to keep a centralized record for audits.
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-xs">
+                              <table className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-zinc-50 border-b border-zinc-200 text-zinc-500">
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Tax Year</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Category</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px]">Date Logged</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Total Income</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Total Tax</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-center">Status</th>
+                                    <th className="py-3 px-4 font-bold uppercase tracking-wider text-[10px] text-right">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {taxReturns.sort((a, b) => b.year - a.year).map((tr) => (
+                                    <tr key={tr.id} className="border-b border-zinc-100 hover:bg-zinc-50/50 transition-colors">
+                                      <td className="py-3 px-4 font-bold text-zinc-900">{tr.year}</td>
+                                      <td className="py-3 px-4 text-zinc-700 font-medium">
+                                        <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded-md text-[10px] uppercase tracking-wider">{tr.category || 'N/A'}</span>
+                                      </td>
+                                      <td className="py-3 px-4 text-zinc-500">{tr.dateFiled}</td>
+                                      <td className="py-3 px-4 text-right font-mono text-zinc-700">${tr.totalIncome.toFixed(2)}</td>
+                                      <td className="py-3 px-4 text-right font-mono text-indigo-700 font-bold">${tr.totalTax.toFixed(2)}</td>
+                                      <td className="py-3 px-4 text-center">
+                                        <span className={`px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wider ${
+                                          tr.status === 'accepted' ? 'bg-emerald-100 text-emerald-800' :
+                                          tr.status === 'rejected' ? 'bg-rose-100 text-rose-800' :
+                                          tr.status === 'filed' ? 'bg-indigo-100 text-indigo-800' :
+                                          'bg-amber-100 text-amber-800'
+                                        }`}>
+                                          {tr.status}
+                                        </span>
+                                      </td>
+                                      <td className="py-3 px-4 text-right">
+                                        <button
+                                          onClick={() => {
+                                            if (confirm("Delete this tax return log?")) {
+                                              setTaxReturns(prev => prev.filter(r => r.id !== tr.id));
+                                              handleShowAlert("🗑️ Tax return log deleted.");
+                                            }
+                                          }}
+                                          className="text-rose-500 hover:text-rose-700 p-1 bg-rose-50 rounded-md transition-colors"
+                                          title="Delete Log"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      )}
               {/* Payroll view */}
               {activeTab === "payroll" && (
                 <Payroll onShowAlert={handleShowAlert} />
@@ -12626,9 +12793,9 @@ export default function App() {
                   // Determine if user profile is on pro, business, or unlimited plan
                   const isPremiumTier =
                     userProfile &&
-                    ["growth", "pro", "business", "unlimited"].includes(
+                    (["growth", "pro", "business", "unlimited"].includes(
                       userProfile.paymentTier || "",
-                    );
+                    ) || userProfile.email?.toLowerCase().trim() === "brigittalombard09@gmail.com" || userProfile.email?.toLowerCase().trim() === "info@seolab.co.za");
 
                   // Creditors & Debtors ledger requires Pro workspace plan or higher, Solo users are blocked
                   const showActiveFeature = !!isPremiumTier;

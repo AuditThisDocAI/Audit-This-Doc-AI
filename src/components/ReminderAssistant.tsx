@@ -456,9 +456,12 @@ export default function ReminderAssistant({
     try {
       const resp = await fetch("/api/reminders");
       if (resp.ok) {
-        const data = await resp.json();
+        const contentType = resp.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await resp.json();
         setReminders(data);
-        localStorage.setItem("gmi_fallback_reminders", JSON.stringify(data));
+          localStorage.setItem("gmi_fallback_reminders", JSON.stringify(data));
+        }
       } else {
         const fallback = localStorage.getItem("gmi_fallback_reminders");
         if (fallback) setReminders(JSON.parse(fallback));

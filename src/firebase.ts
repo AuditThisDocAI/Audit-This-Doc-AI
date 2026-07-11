@@ -1,24 +1,84 @@
-import { initializeApp, getApps, getApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { initializeFirestore, doc } from "firebase/firestore";
+import firebaseConfig from "../firebase-applet-config.json";
 
-let app: any
-let auth: any
-let db: any
+let db: any = null;
+let auth: any = null;
+let isRealFirebase = false;
 
-export async function initFirebase() {
-  if (getApps().length > 0) { 
-  app = getApp()
-  auth = getAuth(app)
-  db = getFirestore(app)
-  return { app, auth, db }
+try {
+  // Check if we have valid Firebase API credentials and didn't fall back to placeholders
+  const isPlaceholder = !firebaseConfig.apiKey || 
+                       firebaseConfig.apiKey.includes("FakeKeyPlaceholder") || 
+                       firebaseConfig.projectId.includes("smart-invoice-assistant");
+                       
+  if (!isPlaceholder) {
+    const app = initializeApp(firebaseConfig);
+    const databaseId = "firestoreDatabaseId" in firebaseConfig ? (firebaseConfig as any).firestoreDatabaseId : undefined;
+    db = initializeFirestore(app, { 
+      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: false
+    }, databaseId);
+    auth = getAuth(app);
+    isRealFirebase = true;
+    console.log("🔥 Successfully initialized real Firebase service connecting to:", firebaseConfig.projectId);
+  } else {
+    // Initialize mock fallback instance so imports do not break during compile
+    const app = initializeApp(firebaseConfig);
+    const databaseId = "firestoreDatabaseId" in firebaseConfig ? (firebaseConfig as any).firestoreDatabaseId : undefined;
+    db = initializeFirestore(app, { 
+      experimentalForceLongPolling: true,
+      experimentalAutoDetectLongPolling: false
+    }, databaseId);
+    auth = getAuth(app);
+    isRealFirebase = false;
+    console.log("ℹ️ Initialized local container mode for Firebase.");
   }
-  const response = await fetch('/firebase-applet-config.json')
-  const config = await response.json()
- app = initializeApp(config)
-auth = getAuth(app)
-db = getFirestore(app)
-return { app, auth, db }
+} catch (error) {
+  console.warn("⚠️ Firebase integration initialized in local fallback mode:", error);
+  isRealFirebase = false;
 }
-export { auth, db } 
-  
+
+export { db, auth, isRealFirebase };
+
+export enum OperationType {
+  CREATE = "create",
+  UPDATE = "update",
+  DELETE = "delete",
+  LIST = "list",
+  GET = "get",
+  WRITE = "write"
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+  };
+}
+
+/**
+ * Custom Error Handler mandated by Firebase Security Rules specifications.
+ * Serializes permission and rule blocks to JSON structure for debugging.
+ */
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth?.currentUser?.uid || null,
+      email: auth?.currentUser?.email || null,
+      emailVerified: auth?.currentUser?.emailVerified || false,
+      isAnonymous: auth?.currentUser?.isAnonymous || false
+    },
+    operationType,
+    path
+  };
+  console.error("🔒 Firestore Security Violation/Error: ", JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}

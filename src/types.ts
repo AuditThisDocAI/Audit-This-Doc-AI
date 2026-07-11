@@ -301,3 +301,14 @@ export interface DebtorRecord {
 
 
 
+
+export interface TaxReturnRecord {
+  id: string;
+  year: number;
+  dateFiled: string;
+  status: "pending" | "filed" | "accepted" | "rejected";
+  category: "Personal" | "Business" | "Capital Gains" | string;
+  totalIncome: number;
+  totalTax: number;
+  notes: string;
+}
