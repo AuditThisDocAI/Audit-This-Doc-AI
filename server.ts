@@ -243,7 +243,7 @@ app.get("/api/ai/status", (req, res) => {
 });
 
 // Lazy initialized Stripe handle to avoid crashing on launch if environment keys are missing
-let stripeInstance: Stripe | null = null;
+let stripeInstance: any = null;
 function getStripe() {
   if (!stripeInstance) {
     let key = process.env.STRIPE_SECRET_KEY;
