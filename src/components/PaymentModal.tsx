@@ -19,6 +19,7 @@ import {
   LockKeyhole,
 } from "lucide-react";
 import { DocumentData, UserAccount } from "../types";
+import { API_BASE, apiFetch } from "../utils/api";
 import { db, isRealFirebase } from "../firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { loadStripe, Stripe } from "@stripe/stripe-js";
@@ -77,7 +78,7 @@ function StripeCardForm({
     setCardError(null);
 
     try {
-      const response = await fetch("/api/stripe/create-subscription", {
+      const response = await apiFetch("/api/stripe/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -87,10 +88,10 @@ function StripeCardForm({
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to initialize payment");
+        throw new Error(data.error || data.message || "Failed to initialize payment");
       }
 
       if (!data.clientSecret) {
@@ -234,8 +235,15 @@ export default function PaymentModal({
 
   useEffect(() => {
     if (isOpen && !stripePromiseState && !stripePromise) {
-      fetch("/api/stripe/config")
-        .then((res) => res.json())
+      apiFetch("/api/stripe/config")
+        .then((res) => {
+          if (!res.ok) {
+            return res.json().catch(() => ({})).then(errData => {
+              throw new Error(errData.error || errData.message || "Failed to load Stripe key");
+            });
+          }
+          return res.json();
+        })
         .then((data) => {
           if (data.publishableKey) {
             stripePromise = loadStripe(data.publishableKey);
@@ -286,19 +294,19 @@ export default function PaymentModal({
     setIsProcessing(true);
     try {
       const planId = billingInterval === "annual" ? `${plan}_annual` : `${plan}_monthly`;
-      const res = await fetch("/api/freemius/checkout", {
+      const res = await apiFetch("/api/freemius/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId, email: userProfile?.email })
       });
-      const data = await res.json();
-      if (data.checkoutLink) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.checkoutLink) {
         window.location.href = data.checkoutLink;
       } else {
-        safeAlert("Failed to initialize Freemius checkout.");
+        safeAlert(data.error || data.message || "Failed to initialize Freemius checkout.");
       }
-    } catch (err) {
-      safeAlert("Failed to initialize Freemius checkout.");
+    } catch (err: any) {
+      safeAlert(err.message || "Failed to initialize Freemius checkout.");
     } finally {
       setIsProcessing(false);
     }
@@ -307,19 +315,19 @@ export default function PaymentModal({
   const handleFreemiusCreditCheckout = async (packId: string) => {
     setIsProcessing(true);
     try {
-      const res = await fetch("/api/freemius/checkout", {
+      const res = await apiFetch("/api/freemius/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ planId: packId, email: userProfile?.email })
       });
-      const data = await res.json();
-      if (data.checkoutLink) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.checkoutLink) {
         window.location.href = data.checkoutLink;
       } else {
-        safeAlert("Failed to initialize Freemius checkout.");
+        safeAlert(data.error || data.message || "Failed to initialize Freemius checkout.");
       }
-    } catch (err) {
-      safeAlert("Failed to initialize Freemius checkout.");
+    } catch (err: any) {
+      safeAlert(err.message || "Failed to initialize Freemius checkout.");
     } finally {
       setIsProcessing(false);
     }
@@ -453,7 +461,7 @@ export default function PaymentModal({
     setIsProcessing(true);
 
     try {
-      const response = await fetch("/api/stripe/create-subscription", {
+      const response = await apiFetch("/api/stripe/create-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -464,10 +472,10 @@ export default function PaymentModal({
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(
-          data.error || "Failed to initialize debit order subscription",
+          data.error || data.message || "Failed to initialize debit order subscription",
         );
       }
 

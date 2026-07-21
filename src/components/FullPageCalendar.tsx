@@ -22,6 +22,7 @@ import {
   AlertCircle,
   HelpCircle
 } from "lucide-react";
+import { API_BASE, apiFetch } from "../utils/api";
 
 interface ServiceSchedule {
   id: string;
@@ -325,7 +326,7 @@ export default function FullPageCalendar({
   const toggleDispatchStatus = async (schedId: string, currentStatus: string) => {
     setIsTogglingStatus(true);
     try {
-      const res = await fetch(`/api/recurring/${schedId}/toggle`, {
+      const res = await apiFetch(`/api/recurring/${schedId}/toggle`, {
         method: "PATCH"
       });
       if (res.ok) {
@@ -351,10 +352,11 @@ export default function FullPageCalendar({
           });
         }
       } else {
-        handleShowAlert("❌ Failed modifying recurring status");
+        const errJson = await res.json().catch(() => ({}));
+        handleShowAlert("❌ Failed modifying recurring status: " + (errJson.error || errJson.message || "Server error."));
       }
-    } catch (err) {
-      handleShowAlert("❌ Connection error editing schedule status.");
+    } catch (err: any) {
+      handleShowAlert("❌ Connection error editing schedule status: " + (err.message || "Network error."));
     } finally {
       setIsTogglingStatus(false);
     }
@@ -364,7 +366,7 @@ export default function FullPageCalendar({
   const runSimulatedDispatchNow = async (sched: ServiceSchedule, dateStr: string) => {
     setIsSimulatingTrigger(true);
     try {
-      const res = await fetch(`/api/recurring/${sched.id}/trigger`, {
+      const res = await apiFetch(`/api/recurring/${sched.id}/trigger`, {
         method: "POST"
       });
       if (res.ok) {
@@ -372,11 +374,11 @@ export default function FullPageCalendar({
         await fetchRecurringSchedules();
         setSelectedForecast(null);
       } else {
-        const errorData = await res.json();
-        handleShowAlert(`❌ Simulation trigger failed: ${errorData.error || "Server issue"}`);
+        const errorData = await res.json().catch(() => ({}));
+        handleShowAlert(`❌ Simulation trigger failed: ${errorData.error || errorData.message || "Server issue"}`);
       }
-    } catch (err) {
-      handleShowAlert("❌ Network error attempting repeat projection.");
+    } catch (err: any) {
+      handleShowAlert("❌ Network error attempting repeat projection: " + (err.message || "Network error."));
     } finally {
       setIsSimulatingTrigger(false);
     }

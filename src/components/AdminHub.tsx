@@ -26,6 +26,7 @@ import {
   Calculator
 } from "lucide-react";
 import { UserAccount } from "../types";
+import { API_BASE, apiFetch } from "../utils/api";
 import SimpleCalculator from "./SimpleCalculator";
 
 interface AdminHubProps {
@@ -61,10 +62,13 @@ export default function AdminHub({ currentAdminEmail, onUserDbChange }: AdminHub
   const fetchFailedLogs = async () => {
     setIsLoadingLogs(true);
     try {
-      const response = await fetch("/api/stripe/failed-logs");
+      const response = await apiFetch("/api/stripe/failed-logs");
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         setFailedLogs(data.logs || []);
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        console.error("Failed to fetch logs:", errJson.error || errJson.message || `HTTP ${response.status}`);
       }
     } catch (e) {
       console.error("Failed to fetch logs:", e);

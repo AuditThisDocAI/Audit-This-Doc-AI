@@ -17,6 +17,7 @@ import {
   Workflow,
   Plus
 } from "lucide-react";
+import { API_BASE, apiFetch } from "../utils/api";
 
 export interface SupportMessage {
   id: string;
@@ -376,7 +377,7 @@ export default function SupportChat({
       // Keep only last 10 messages for context
       const chatContextHistory = messages.filter(m => m.sender !== "admin").slice(-10);
 
-      const resp = await fetch("/api/ai/aria-support-chat", {
+      const resp = await apiFetch("/api/ai/aria-support-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -444,15 +445,16 @@ export default function SupportChat({
         localStorage.setItem("gmi_support_chat_messages", JSON.stringify(currentAll));
         setMessages(prev => [...prev, ariaMsg]);
       } else {
-        throw new Error('Server returned ' + resp.status);
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || `HTTP ${resp.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Support chat error:", err);
       const ariaErrorMsg: SupportMessage = {
         id: "msg-aria-" + Date.now(),
         sender: "aria",
         senderName: "Aria",
-        text: "I had a tiny connection hiccup! 🌸 My servers are currently under heavy load or syncing. Please try sending your message again in a moment.",
+        text: `Error: ${err.message || "I had a tiny connection hiccup!"} 🌸 My servers are currently under heavy load or syncing. Please try sending your message again in a moment.`,
         timestamp: new Date().toISOString(),
         userEmail: currentUserEmail
       };

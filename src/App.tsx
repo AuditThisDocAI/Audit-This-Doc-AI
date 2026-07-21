@@ -111,6 +111,7 @@ import {
   INDUSTRY_PRESETS,
   MEMORY_SAMPLES,
 } from "./data";
+import { API_BASE, apiFetch } from "./utils/api";
 import { toPng } from "html-to-image";
 import { generateStructuredPDF } from "./utils/pdfGenerator";
 import { jsPDF } from "jspdf";
@@ -1757,13 +1758,16 @@ export default function App() {
     let interval: NodeJS.Timeout;
     const fetchLinks = async () => {
       try {
-        const res = await fetch("/api/stripe/payment-links");
+        const res = await apiFetch("/api/stripe/payment-links");
         if (res.ok) {
           const contentType = res.headers.get("content-type");
           if (contentType && contentType.includes("application/json")) {
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             setRecentPaymentLinks(data.links || []);
           }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          console.error("Failed to fetch payment links:", errData.error || errData.message || `HTTP ${res.status}`);
         }
       } catch (err) {
         console.error("Failed to fetch payment links:", err);
@@ -1785,7 +1789,7 @@ export default function App() {
       const fetchStatus = async () => {
         setIsFetchingLastPaymentStatus(true);
         try {
-          const res = await fetch("/api/stripe/last-payment-status", {
+          const res = await apiFetch("/api/stripe/last-payment-status", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -1793,8 +1797,8 @@ export default function App() {
               clientName: activeDoc.clientName,
             }),
           });
-          const data = await res.json();
-          if (data.status && data.status !== "none") {
+          const data = await res.json().catch(() => ({}));
+          if (res.ok && data.status && data.status !== "none") {
             setClientLastPaymentStatus(data);
           } else {
             setClientLastPaymentStatus(null);
@@ -2284,12 +2288,12 @@ export default function App() {
 
   const fetchRecurringSchedules = async () => {
     try {
-      const res = await fetch("/api/recurring");
+      const res = await apiFetch("/api/recurring");
       if (res.ok) {
         const contentType = res.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
           const data = await res.json();
-        setRecurringSchedules(data);
+          setRecurringSchedules(data);
           localStorage.setItem("gmi_fallback_recurring", JSON.stringify(data));
         }
       } else {
@@ -3101,6 +3105,19 @@ export default function App() {
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
+    const handleApiError = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail?.message) {
+        handleShowAlert(`❌ ${customEvent.detail.message}`);
+      }
+    };
+    window.addEventListener("api-error", handleApiError);
+    return () => {
+      window.removeEventListener("api-error", handleApiError);
+    };
+  }, []);
+
+  useEffect(() => {
     // Check local storage persistence
     const cachedHistory = localStorage.getItem("gmi_history");
     if (cachedHistory) {
@@ -3178,7 +3195,7 @@ export default function App() {
     }
 
     // Ping the AI status route
-    fetch("/api/ai/status")
+    apiFetch("/api/ai/status")
       .then((res) => res.json())
       .then((data) => {
         setAiStatus(data);
@@ -3186,8 +3203,9 @@ export default function App() {
       .catch((err) => {
         console.warn(
           "Notice: server AI status is offline, running client-only fallback.",
+          err
         );
-        setAiStatus({ hasKey: false, message: "Server connection offline." });
+        setAiStatus({ hasKey: false, message: "Server connection offline: " + err.message });
       });
 
     // Setup speech recognition if available
@@ -4222,7 +4240,7 @@ export default function App() {
     ];
 
     try {
-      const response = await fetch("/api/ai/autofill", {
+      const response = await apiFetch("/api/ai/autofill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4232,8 +4250,8 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed to trigger AI generation");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Failed to trigger AI generation");
       }
 
       const generatedDoc = await response.json();
@@ -4324,7 +4342,7 @@ export default function App() {
     ];
 
     try {
-      const response = await fetch("/api/ai/autofill", {
+      const response = await apiFetch("/api/ai/autofill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4334,8 +4352,8 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Failed content mapping");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Failed content mapping");
       }
 
       const generatedDoc = await response.json();
@@ -4670,7 +4688,7 @@ export default function App() {
     setCalculatingItemIds((prev) => [...prev, id]);
 
     try {
-      const response = await fetch("/api/ai/smart-calculate", {
+      const response = await apiFetch("/api/ai/smart-calculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4681,7 +4699,8 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to calculate price");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Failed to calculate price");
       }
 
       const data = await response.json();
@@ -4699,7 +4718,7 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       handleShowAlert(
-        "❌ Error during Smart Calculation. Please check your connectivity.",
+        "❌ Error during Smart Calculation: " + (err.message || "Please check your connectivity."),
       );
     } finally {
       setCalculatingItemIds((prev) => prev.filter((item) => item !== id));
@@ -20364,7 +20383,7 @@ export default function App() {
                                             type="button"
                                             onClick={async () => {
                                               try {
-                                                const res = await fetch(
+                                                const res = await apiFetch(
                                                   "/api/stripe/create-invoice-session",
                                                   {
                                                     method: "POST",
@@ -20405,14 +20424,14 @@ export default function App() {
                                                     "✅ Stripe payment link generated successfully!",
                                                   );
                                                 } else {
-                                                  const err = await res.json();
+                                                  const err = await res.json().catch(() => ({}));
                                                   handleShowAlert(
-                                                    `❌ Failed to generate Stripe link: ${err.error}`,
+                                                    `❌ Failed to generate Stripe link: ${err.error || err.message || "Server error"}`,
                                                   );
                                                 }
-                                              } catch (e) {
+                                              } catch (e: any) {
                                                 handleShowAlert(
-                                                  "❌ Failed to generate Stripe link",
+                                                  "❌ Failed to generate Stripe link: " + (e.message || "Network error")
                                                 );
                                               }
                                             }}
@@ -20809,7 +20828,7 @@ export default function App() {
                                       }
                                       setLoadingRecurring(true);
                                       try {
-                                        const res = await fetch(
+                                        const res = await apiFetch(
                                           "/api/recurring/schedule",
                                           {
                                             method: "POST",
@@ -20841,14 +20860,14 @@ export default function App() {
                                           );
                                           fetchRecurringSchedules();
                                         } else {
-                                          const data = await res.json();
+                                          const data = await res.json().catch(() => ({}));
                                           handleShowAlert(
-                                            `❌ Setup failed: ${data.error}`,
+                                            `❌ Setup failed: ${data.error || data.message || "Server error"}`,
                                           );
                                         }
-                                      } catch (err) {
+                                      } catch (err: any) {
                                         handleShowAlert(
-                                          "❌ Network error connecting to recurring services.",
+                                          "❌ Network error connecting to recurring services: " + (err.message || "Network error."),
                                         );
                                       } finally {
                                         setLoadingRecurring(false);
@@ -20990,7 +21009,7 @@ export default function App() {
                                               type="button"
                                               onClick={async () => {
                                                 try {
-                                                  const res = await fetch(
+                                                  const res = await apiFetch(
                                                     `/api/recurring/${sched.id}/toggle`,
                                                     {
                                                       method: "PATCH",
@@ -21004,13 +21023,14 @@ export default function App() {
                                                     );
                                                     fetchRecurringSchedules();
                                                   } else {
+                                                    const data = await res.json().catch(() => ({}));
                                                     handleShowAlert(
-                                                      "❌ Failed toggling dispatch status",
+                                                      "❌ Failed toggling dispatch status: " + (data.error || data.message || "Server error"),
                                                     );
                                                   }
-                                                } catch (err) {
+                                                } catch (err: any) {
                                                   handleShowAlert(
-                                                    "❌ Connection error",
+                                                    "❌ Connection error: " + (err.message || "Network error"),
                                                   );
                                                 }
                                               }}
@@ -21039,7 +21059,7 @@ export default function App() {
                                               type="button"
                                               onClick={async () => {
                                                 try {
-                                                  const res = await fetch(
+                                                  const res = await apiFetch(
                                                     `/api/recurring/${sched.id}/trigger`,
                                                     { method: "POST" },
                                                   );
@@ -21049,13 +21069,14 @@ export default function App() {
                                                     );
                                                     fetchRecurringSchedules();
                                                   } else {
+                                                    const data = await res.json().catch(() => ({}));
                                                     handleShowAlert(
-                                                      "❌ Failed triggering simulation",
+                                                      "❌ Failed triggering simulation: " + (data.error || data.message || "Server error"),
                                                     );
                                                   }
-                                                } catch (e) {
+                                                } catch (e: any) {
                                                   handleShowAlert(
-                                                    "❌ Connection error",
+                                                    "❌ Connection error: " + (e.message || "Network error"),
                                                   );
                                                 }
                                               }}
@@ -21069,7 +21090,7 @@ export default function App() {
                                               type="button"
                                               onClick={async () => {
                                                 try {
-                                                  const res = await fetch(
+                                                  const res = await apiFetch(
                                                     `/api/recurring/${sched.id}`,
                                                     { method: "DELETE" },
                                                   );
@@ -21079,13 +21100,14 @@ export default function App() {
                                                     );
                                                     fetchRecurringSchedules();
                                                   } else {
+                                                    const data = await res.json().catch(() => ({}));
                                                     handleShowAlert(
-                                                      "❌ Failed removing schedule.",
+                                                      "❌ Failed removing schedule: " + (data.error || data.message || "Server error"),
                                                     );
                                                   }
-                                                } catch (e) {
+                                                } catch (e: any) {
                                                   handleShowAlert(
-                                                    "❌ Connection error",
+                                                    "❌ Connection error: " + (e.message || "Network error"),
                                                   );
                                                 }
                                               }}
@@ -24865,7 +24887,7 @@ export default function App() {
                     }
                     setIsGeneratingStripeLink(true);
                     try {
-                      const res = await fetch(
+                      const res = await apiFetch(
                         "/api/stripe/create-one-time-link",
                         {
                           method: "POST",
@@ -24886,9 +24908,9 @@ export default function App() {
                           "✅ One-time payment link created securely.",
                         );
                       } else {
-                        const errData = await res.json();
+                        const errData = await res.json().catch(() => ({}));
                         handleShowAlert(
-                          `❌ Failed to create link: ${errData.error}`,
+                          `❌ Failed to create link: ${errData.error || errData.message || "Server error"}`,
                         );
                         setFailedLinkGenerations((prev) =>
                           [

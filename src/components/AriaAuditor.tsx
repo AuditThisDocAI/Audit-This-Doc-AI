@@ -18,6 +18,7 @@ import {
   Download
 } from "lucide-react";
 import { DocumentData, DocumentItem, UserAccount } from "../types";
+import { API_BASE, apiFetch } from "../utils/api";
 
 const simulatedExtractedInvoices = [
   {
@@ -454,11 +455,17 @@ export default function AriaAuditor({
     }, 1500);
 
     try {
-      const res = await fetch("/api/ai/audit-document", {
+      const res = await apiFetch("/api/ai/audit-document", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ documentData: activeDoc })
       });
+      
+      if (!res.ok) {
+        const errorJson = await res.json().catch(() => ({}));
+        throw new Error(errorJson.error || errorJson.message || `HTTP ${res.status}`);
+      }
+
       const data = await res.json();
       
       if (scanIntervalRef.current) {
@@ -480,10 +487,10 @@ export default function AriaAuditor({
         onShowAlert(`🎓 Audits complete! Comprehensive AI analysis verified.`);
       }, 500);
 
-    } catch (e) {
+    } catch (e: any) {
       if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
       setIsScanning(false);
-      onShowAlert("❌ Server error during document audit.");
+      onShowAlert("❌ Audit Error: " + (e.message || "Server error during document audit."));
     }
   };
 
@@ -524,7 +531,7 @@ export default function AriaAuditor({
       }
 
       try {
-        const res = await fetch("/api/ai/scan-document", {
+        const res = await apiFetch("/api/ai/scan-document", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -533,6 +540,11 @@ export default function AriaAuditor({
             filename: file.name
           })
         });
+
+        if (!res.ok) {
+          const errorJson = await res.json().catch(() => ({}));
+          throw new Error(errorJson.error || errorJson.message || `HTTP ${res.status}`);
+        }
 
         const data = await res.json();
         clearInterval(interval);
@@ -557,11 +569,11 @@ export default function AriaAuditor({
         } else {
           onShowAlert("❌ Could not extract document data.");
         }
-      } catch (err) {
+      } catch (err: any) {
         clearInterval(interval);
         setIsOcrParsing(false);
         console.error(err);
-        onShowAlert("❌ Server error during OCR scan.");
+        onShowAlert("❌ Scan Error: " + (err.message || "Server error during OCR scan."));
       }
     };
     reader.readAsDataURL(file);

@@ -17,6 +17,7 @@ import {
 import { DocumentData, ScheduledReminder, UserAccount, SavedHistory, ProfileCatalog } from "../types";
 import { MessageSquare, ShieldCheck, Smartphone, Video } from "lucide-react";
 import NotificationCenter from "./NotificationCenter";
+import { API_BASE, apiFetch } from "../utils/api";
 
 import { initAuth, googleSignIn, syncEventToGoogleCalendar, sendEmailViaGmailAPI, createGoogleMeetSpace } from "../google-calendar";
 
@@ -150,16 +151,18 @@ export default function ReminderAssistant({
   const openPreviewModal = async (id: string) => {
     setOpeningPreview(true);
     try {
-      const resp = await fetch(`/api/reminders/preview/${id}`);
+      const resp = await apiFetch(`/api/reminders/preview/${id}`);
       if (resp.ok) {
         const html = await resp.text();
         setPreviewHtml(html);
         setPreviewReminderId(id);
       } else {
-        alert("Failed to load email preview.");
+        const errJson = await resp.json().catch(() => ({}));
+        alert("Failed to load email preview: " + (errJson.error || errJson.message || `HTTP ${resp.status}`));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert("Failed to load email preview: " + (e.message || "Network error."));
     } finally {
       setOpeningPreview(false);
     }
@@ -331,7 +334,7 @@ export default function ReminderAssistant({
                 setSuccessMess(`⚡ Automated Overdue Follow-up dispatched to ${inv.clientEmail} via Gmail API!`);
               }
 
-              await fetch("/api/reminders/schedule", {
+              const res = await apiFetch("/api/reminders/schedule", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -350,6 +353,10 @@ export default function ReminderAssistant({
                   skipBackendEmailDispatch: !!(calendarToken && inv.clientEmail) // tell backend skip actual dispatch since we did via api
                 })
               });
+              if (!res.ok) {
+                const errJson = await res.json().catch(() => ({}));
+                console.error("Auto dispatch API error:", errJson.error || errJson.message);
+              }
             } catch (e) {
               console.error("Auto dispatch API failure:", e);
             }
@@ -454,19 +461,19 @@ export default function ReminderAssistant({
   const fetchReminders = async () => {
     setFetching(true);
     try {
-      const resp = await fetch("/api/reminders");
+      const resp = await apiFetch("/api/reminders");
       if (resp.ok) {
         const contentType = resp.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
           const data = await resp.json();
-        setReminders(data);
+          setReminders(data);
           localStorage.setItem("gmi_fallback_reminders", JSON.stringify(data));
         }
       } else {
         const fallback = localStorage.getItem("gmi_fallback_reminders");
         if (fallback) setReminders(JSON.parse(fallback));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Notice: reminders service is offline. Falling back to offline client cache.", err);
       const fallback = localStorage.getItem("gmi_fallback_reminders");
       if (fallback) setReminders(JSON.parse(fallback));
@@ -488,7 +495,7 @@ export default function ReminderAssistant({
     const sender = activeDoc.senderCompany || activeDoc.senderName || "our billing team";
 
     try {
-      const resp = await fetch("/api/ai/compose-reminder", {
+      const resp = await apiFetch("/api/ai/compose-reminder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -509,10 +516,12 @@ export default function ReminderAssistant({
         setReminderText(data.text);
         setSuccessMess("✨ AI Assistant composed a highly personalized, custom follow-up reminder draft!");
       } else {
-        throw new Error("Failed to get custom draft from Gemini");
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || "Failed to get custom draft from Gemini");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn("Falling back to local high-quality templates:", err);
+      setErrorMess("AI composition failed: " + (err.message || "Network error."));
       // Standard high quality template generated instantly on client to avoid network delays
       const politePhrasings = [
         `Greetings from ${sender}. We hope your week is off to a stellar start! This is a brief notes check-in concerning outstanding matters valued at ${activeDoc.currency || "$"}${totalAmount.toFixed(2)}.\n\nWe would highly appreciate it if you could verify the status of our collaboration records today.\n\nThank you exponentially for your consistent partnership!`,
@@ -607,7 +616,7 @@ export default function ReminderAssistant({
         }
       } else {
         // Handle via standard API fallback
-        const resp = await fetch("/api/reminders/schedule", {
+        const resp = await apiFetch("/api/reminders/schedule", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -627,8 +636,8 @@ export default function ReminderAssistant({
         });
 
         if (!resp.ok) {
-          const errData = await resp.json();
-          throw new Error(errData.error || "Failed to schedule reminder.");
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.error || errData.message || "Failed to schedule reminder.");
         }
         respOk = true;
         
@@ -691,7 +700,7 @@ export default function ReminderAssistant({
         } catch (e) {}
       }
 
-      const resp = await fetch(`/api/reminders/${id}/trigger`, {
+      const resp = await apiFetch(`/api/reminders/${id}/trigger`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ smtpConfig })
@@ -700,8 +709,8 @@ export default function ReminderAssistant({
         setSuccessMess("⚡ Reminder triggered immediately and email sent successfully!");
         fetchReminders();
       } else {
-        const errData = await resp.json();
-        throw new Error(errData.error || "Failed to trigger email.");
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Failed to trigger email.");
       }
     } catch (err: any) {
       setErrorMess(err.message || "Trigger error.");
@@ -712,12 +721,13 @@ export default function ReminderAssistant({
     setErrorMess(null);
     setSuccessMess(null);
     try {
-      const resp = await fetch(`/api/reminders/${id}`, { method: "DELETE" });
+      const resp = await apiFetch(`/api/reminders/${id}`, { method: "DELETE" });
       if (resp.ok) {
         setSuccessMess("🗑️ Reminder cancelled successfully.");
         fetchReminders();
       } else {
-        throw new Error("Deletion failed.");
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || "Deletion failed.");
       }
     } catch (err: any) {
       setErrorMess(err.message || "Delete error.");
@@ -991,7 +1001,7 @@ export default function ReminderAssistant({
                                   } catch (e) {}
                                 }
 
-                                const response = await fetch("/api/reminders/schedule", {
+                                const response = await apiFetch("/api/reminders/schedule", {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({
@@ -1014,7 +1024,8 @@ export default function ReminderAssistant({
                                   setSuccessMess(`🚀 Dispatched custom overdue email successfully to ${inv.clientEmail}!`);
                                   fetchReminders();
                                 } else {
-                                  alert("Failed to queue email follow-up.");
+                                  const errData = await response.json().catch(() => ({}));
+                                  alert("Failed to queue email follow-up: " + (errData.error || errData.message || "Server error."));
                                 }
                               } catch (err) {
                                 console.error(err);
